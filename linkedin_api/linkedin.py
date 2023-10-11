@@ -297,25 +297,6 @@ class Linkedin(object):
         keywords=None,
         connection_of=None,
         network_depths=None,
-        current_company=None,
-        past_companies=None,
-        nonprofit_interests=None,
-        profile_languages=None,
-        regions=None,
-        industries=None,
-        schools=None,
-        contact_interests=None,
-        service_categories=None,
-        include_private_profiles=False,  # profiles without a public id, "Linkedin Member"
-        # Keywords filter
-        keyword_first_name=None,
-        keyword_last_name=None,
-        # `keyword_title` and `title` are the same. We kept `title` for backward compatibility. Please only use one of them.
-        keyword_title=None,
-        keyword_company=None,
-        keyword_school=None,
-        network_depth=None,  # DEPRECATED - use network_depths
-        title=None,  # DEPRECATED - use keyword_title
         **kwargs,
     ):
         """Perform a LinkedIn search for people.
@@ -366,71 +347,40 @@ class Linkedin(object):
         if network_depths:
             stringify = " | ".join(network_depths)
             filters.append(f"(key:network,value:List({stringify}))")
-        elif network_depth:
-            filters.append(f"(key:network,value:List({network_depth}))")
-        if regions:
-            stringify = " | ".join(regions)
-            filters.append(f"(key:geoUrn,value:List({stringify}))")
-        if industries:
-            stringify = " | ".join(industries)
-            filters.append(f"(key:industry,value:List({stringify}))")
-        if current_company:
-            stringify = " | ".join(current_company)
-            filters.append(f"(key:currentCompany,value:List({stringify}))")
-        if past_companies:
-            stringify = " | ".join(past_companies)
-            filters.append(f"(key:pastCompany,value:List({stringify}))")
-        if profile_languages:
-            stringify = " | ".join(profile_languages)
-            filters.append(f"(key:profileLanguage,value:List({stringify}))")
-        if nonprofit_interests:
-            stringify = " | ".join(nonprofit_interests)
-            filters.append(f"(key:nonprofitInterest,value:List({stringify}))")
-        if schools:
-            stringify = " | ".join(schools)
-            filters.append(f"(key:schools,value:List({stringify}))")
-        if service_categories:
-            stringify = " | ".join(service_categories)
-            filters.append(f"(key:serviceCategory,value:List({stringify}))")
-        # `Keywords` filter
-        keyword_title = keyword_title if keyword_title else title
-        if keyword_first_name:
-            filters.append(f"(key:firstName,value:List({keyword_first_name}))")
-        if keyword_last_name:
-            filters.append(f"(key:lastName,value:List({keyword_last_name}))")
-        if keyword_title:
-            filters.append(f"(key:title,value:List({keyword_title}))")
-        if keyword_company:
-            filters.append(f"(key:company,value:List({keyword_company}))")
-        if keyword_school:
-            filters.append(f"(key:school,value:List({keyword_school}))")
-
-        params = {"filters": "List({})".format(",".join(filters))}
+            
+        params = {
+            "filters": "List({})".format(",".join(filters))
+        }
 
         if keywords:
             params["keywords"] = keywords
 
         data = self.search(params, **kwargs)
-
+        # print(data)
         results = []
         for item in data:
-            if (
-                not include_private_profiles
-                and (item.get("entityCustomTrackingInfo") or {}).get(
-                    "memberDistance", None
-                )
-                == "OUT_OF_NETWORK"
-            ):
-                continue
+            image = item.get("image", {})
+            attributes = image.get("attributes", [{}])[0]
+            detail_data = attributes.get("detailData", {})
+            non_entity_profile_picture = detail_data.get("nonEntityProfilePicture", {})
+
+            if non_entity_profile_picture:
+                vector_image = non_entity_profile_picture.get("vectorImage", {})
+                if vector_image:
+                    artifacts = vector_image.get("artifacts", [{}])[0]
+                    file_identifying_url = artifacts.get("fileIdentifyingUrlPathSegment", None)
+                else:
+                    file_identifying_url = None
+            else:
+                file_identifying_url = None
+
             results.append(
                 {
                     "urn_id": get_id_from_urn(
                         get_urn_from_raw_update(item.get("entityUrn", None))
                     ),
-                    "distance": (item.get("entityCustomTrackingInfo") or {}).get(
-                        "memberDistance", None
-                    ),
                     "jobtitle": (item.get("primarySubtitle") or {}).get("text", None),
+                    "foto": file_identifying_url,
                     "location": (item.get("secondarySubtitle") or {}).get("text", None),
                     "name": (item.get("title") or {}).get("text", None),
                 }
@@ -792,7 +742,7 @@ class Linkedin(object):
 
         return profile
 
-    def get_profile_connections(self, urn_id):
+    def get_profile_connections(self, urn_id, **kwargs):
         """Fetch first-degree connections for a given LinkedIn profile.
 
         :param urn_id: LinkedIn URN ID for a profile
@@ -801,7 +751,7 @@ class Linkedin(object):
         :return: List of search results
         :rtype: list
         """
-        return self.search_people(connection_of=urn_id, network_depth="F")
+        return self.search_people(connection_of=urn_id, network_depths="F", **kwargs)
 
     def get_company_updates(
         self, public_id=None, urn_id=None, max_results=None, results=None
